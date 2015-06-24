@@ -123,8 +123,6 @@ void preprocessing(string filename) {
 			cout << i <<" edges read" << endl;
 		}
 	}
-	node[1].print_neighbor();
-	node[2].print_neighbor();
 	delete[] node;
 	fin.close();
 }
