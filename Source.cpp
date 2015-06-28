@@ -4,22 +4,49 @@
 #include <vector>
 
 using namespace std;
-void preprocessing(string filename);
+Node* preprocessing(string filename);
 
 class Node {
 private:
 	int id;
+	int in_degree;
+	int out_degree;
 	float toInf;
 	float fromInf;
 	vector<int> neighbor_in;
 	vector<int> neighbor_out;
+
+	/*	save obj to file without get_method() */
+	friend ostream& operator<<(ostream& os, Node& node) {
+		os << node.id << "\t" << node.in_degree << "\t" << node.out_degree << endl;
+		
+		for (vector<int>::iterator iter = node.neighbor_out.begin(); iter != node.neighbor_out.end(); iter++) {
+			os << *iter << "\t";
+		}
+		os << endl;
+		for (vector<int>::iterator iter = node.neighbor_in.begin(); iter != node.neighbor_in.end(); iter++) {
+			os << *iter << "\t";
+		}
+		os << endl;
+		return os;
+	}
+
 public:
 	Node();
 	Node(int source, int target, bool flag);
 	int get_id();
+	int get_indegree();
+	int get_outdegree();
+	//vector<int> get_neighbor_();
+	//vector<int> get_neighbor_out();
+
 	void set_id(int _id);
+
 	void add_outneighbor(int neighbor);
 	void add_inneighbor(int neighbor);
+	void writeTofile(ofstream *out);
+	void readFromfile(ifstream *in);
+
 	void print_neighbor();
 };
 /* constructor for each node*/
@@ -27,34 +54,54 @@ Node::Node() {
 	id = 0;
 	toInf = 0.0;
 	fromInf = 0.0;
+	in_degree = 0;
+	out_degree = 0;
 }
 Node::Node(int source, int target, bool flag) {
 	/* for source node */
 	if (flag == true) {
 		id = source;
 		neighbor_out.push_back(target);
-
+		out_degree += 1;
 	}
 	/* for target node */
 	else {
 		id = target;
 		neighbor_in.push_back(source);
-
+		in_degree += 1;
 	}
 	toInf = 0.0;
-	fromInf = 0.0;	
+	fromInf = 0.0;
+	in_degree = 0;
+	out_degree = 0;
 }
 int Node::get_id() {
 	return id;
+}
+int Node::get_indegree() {
+	return in_degree;
+}
+int Node::get_outdegree() {
+	return out_degree;
 }
 void Node::set_id(int _id) {
 	id = _id;
 }
 void Node::add_outneighbor(int neighbor) {
 	neighbor_out.push_back(neighbor);
+	out_degree += 1;
 }
 void Node::add_inneighbor(int neighbor) {
 	neighbor_in.push_back(neighbor);
+	in_degree += 1;
+}
+
+/* read/write a object from/to */
+void Node::writeTofile(ofstream *out) {
+	out->write((char*) this, sizeof(this));
+}
+void Node::readFromfile(ifstream *in) {
+	in->read((char*) this, sizeof(this));
 }
 /* for debuggin */
 void Node::print_neighbor() {
@@ -72,11 +119,12 @@ void Node::print_neighbor() {
 }
 
 int main() {
-	preprocessing("web-Stanford.txt");
+	Node* node = preprocessing("web-Stanford.txt");
+	
 	return 0;
 }
 /* preprocessing the origin data*/
-void preprocessing(string filename) {
+Node* preprocessing(string filename) {
 	ifstream fin;
 	fin.open(filename);
 	string line;
@@ -118,11 +166,12 @@ void preprocessing(string filename) {
 			node[idx_target].add_inneighbor(idx_source);
 		}
 
+		/* check current % */
 		i++;
-		if ((i%10000) == 0) {
-			cout << i <<" edges read" << endl;
+		if ((i%230000) == 0) {
+			cout << (i/230000)*10 <<" % read" << endl;
 		}
 	}
-	delete[] node;
 	fin.close();
+	return node;
 }
