@@ -2,9 +2,9 @@
 #include <fstream>
 #include <string>
 #include <vector>
+#include <map>
 
 using namespace std;
-Node* preprocessing(string filename);
 
 class Node {
 private:
@@ -13,10 +13,12 @@ private:
 	int out_degree;
 	float toInf;
 	float fromInf;
-	vector<int> neighbor_in;
-	vector<int> neighbor_out;
+	vector<int> in_neighbor;
+	vector<int> out_neighbor;
 
-	/*	save obj to file without get_method() */
+	/*	
+	save obj to file without get_method()
+
 	friend ostream& operator<<(ostream& os, Node& node) {
 		os << node.id << "\t" << node.in_degree << "\t" << node.out_degree << endl;
 		
@@ -30,15 +32,17 @@ private:
 		os << endl;
 		return os;
 	}
-
+	*/
 public:
 	Node();
 	Node(int source, int target, bool flag);
 	int get_id();
 	int get_indegree();
 	int get_outdegree();
-	//vector<int> get_neighbor_();
-	//vector<int> get_neighbor_out();
+	float get_toinf();
+	float get_fromInf();
+	vector<int> get_in_neighbor();
+	vector<int> get_out_neighbor();
 
 	void set_id(int _id);
 
@@ -59,15 +63,15 @@ Node::Node() {
 }
 Node::Node(int source, int target, bool flag) {
 	/* for source node */
-	if (flag == true) {
+	if (flag == false) {
 		id = source;
-		neighbor_out.push_back(target);
+		out_neighbor.push_back(target);
 		out_degree += 1;
 	}
 	/* for target node */
 	else {
 		id = target;
-		neighbor_in.push_back(source);
+		out_neighbor.push_back(source);
 		in_degree += 1;
 	}
 	toInf = 0.0;
@@ -75,6 +79,8 @@ Node::Node(int source, int target, bool flag) {
 	in_degree = 0;
 	out_degree = 0;
 }
+
+/* getter */
 int Node::get_id() {
 	return id;
 }
@@ -84,15 +90,29 @@ int Node::get_indegree() {
 int Node::get_outdegree() {
 	return out_degree;
 }
+float Node::get_toinf() {
+	return toInf;
+}
+float Node::get_fromInf() {
+	return fromInf;
+}
+vector<int> Node::get_in_neighbor(){
+	return in_neighbor;
+}
+vector<int> Node::get_out_neighbor(){
+	return out_neighbor;
+}
+
+/* setter */
 void Node::set_id(int _id) {
 	id = _id;
 }
 void Node::add_outneighbor(int neighbor) {
-	neighbor_out.push_back(neighbor);
+	out_neighbor.push_back(neighbor);
 	out_degree += 1;
 }
 void Node::add_inneighbor(int neighbor) {
-	neighbor_in.push_back(neighbor);
+	in_neighbor.push_back(neighbor);
 	in_degree += 1;
 }
 
@@ -106,30 +126,66 @@ void Node::readFromfile(ifstream *in) {
 /* for debuggin */
 void Node::print_neighbor() {
 	cout << "Node id: " << id << endl;
-	cout << "out-neighbor: " << neighbor_out.size() << endl;
-	for (vector<int>::iterator iter = neighbor_out.begin(); iter != neighbor_out.end(); iter++) {
+	cout << "out-neighbor: " << out_neighbor.size() << endl;
+	for (vector<int>::iterator iter = out_neighbor.begin(); iter != out_neighbor.end(); iter++) {
 		cout << *iter << "\t";
 	}
 	cout << endl;
-	cout << "in-neighbor: " << neighbor_in.size() << endl;
-	for (vector<int>::iterator iter = neighbor_in.begin(); iter != neighbor_in.end(); iter++) {
+	cout << "in-neighbor: " << in_neighbor.size() << endl;
+	for (vector<int>::iterator iter = in_neighbor.begin(); iter != in_neighbor.end(); iter++) {
 		cout << *iter << "\t";
 	}
 	cout << endl;
 }
+/* function define */
+void preprocessing(string filename, Node node[]);
+float TargerBasedInfluence(Node node[], int i, float thresh);
 
 int main() {
-	Node* node = preprocessing("web-Stanford.txt");
+	int seed_size = 0;
+	float path_threshold = 0.01;
+
+	Node* node = new Node[281904];	//	There are 281,903 nodes 2312497 edges in stanford data.
+	preprocessing("web-Stanford.txt", node);
 	
+	/* data structure for CELF Queue, sorted by toInfluence */
+	multimap< float, Node > Nodes;
+	multimap< float, Node >::reverse_iterator Iter_node;
+	typedef pair< float, Node > NodePair;
+
+	/* 
+	select first node and initiate CELF Queue
+	Node[] index from 1 to 281,903 	
+	*/
+	for (int i = 1; i < 281904; i++){
+		/* small size for testing */
+		if (node[i].get_id() == 0){
+			continue;
+		}
+		else{
+			float tmp_inf = TargerBasedInfluence(node, i, path_threshold);
+			cout << tmp_inf << endl;
+			char tmp;
+			cout << "for viewing the intermediate values" << endl;
+			cin >> tmp;
+		}
+	}
+
+	//Nodes.insert(NodePair(test1.get_outdegree(), test1));
+
+
+	for (Iter_node = Nodes.rbegin(); Iter_node != Nodes.rend(); ++Iter_node){
+		Iter_node->second.get_id();
+		Iter_node->first;
+	}
+
 	return 0;
 }
 /* preprocessing the origin data*/
-Node* preprocessing(string filename) {
+void preprocessing(string filename, Node node[]) {
 	ifstream fin;
 	fin.open(filename);
 	string line;
-
-	Node *node = new Node[281904];	//	There are 281,903 nodes 2312497 edges in stanford data.
 
 	/* except header*/
 	fin.seekg(169);
@@ -170,8 +226,30 @@ Node* preprocessing(string filename) {
 		i++;
 		if ((i%230000) == 0) {
 			cout << (i/230000)*10 <<" % read" << endl;
+			break;
 		}
 	}
+	cout << "Input file read successfully" << endl;
 	fin.close();
-	return node;
+}
+/* computing the influence of a node based on target nodes */
+float TargerBasedInfluence(Node node[], int i, float thresh){
+	int outdegree = node[i].get_outdegree();
+	cout << "id:" << i << endl;
+	cout << "outdegree: " << outdegree << endl;
+	/* if there is no out-neighbor */
+	if (outdegree == 0){
+		return 1;
+	}
+	/* computing influence of children recursively */
+	else{
+		float inf = 0.0;
+		vector<int> out_neighbor = node[i].get_out_neighbor();
+		for (vector<int>::iterator iter = out_neighbor.begin(); iter != out_neighbor.end(); iter++){
+			float inf_child = TargerBasedInfluence(node, *iter, thresh);
+			float weight_child = (1 / node[*iter].get_indegree());
+			inf += weight_child*(1 + inf_child);
+		}
+		return inf;
+	}
 }
