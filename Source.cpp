@@ -11,8 +11,9 @@ private:
 	int id;
 	int in_degree;
 	int out_degree;
-	float toInf;
-	float fromInf;
+	int onpath;
+	double toInf;
+	double fromInf;
 	vector<int> in_neighbor;
 	vector<int> out_neighbor;
 
@@ -39,12 +40,16 @@ public:
 	int get_id();
 	int get_indegree();
 	int get_outdegree();
-	float get_toinf();
-	float get_fromInf();
+	int get_onpath();
+
+	double get_toinf();
+	double get_fromInf();
+
 	vector<int> get_in_neighbor();
 	vector<int> get_out_neighbor();
 
 	void set_id(int _id);
+	void set_onpath(int _onpath);
 
 	void add_outneighbor(int neighbor);
 	void add_inneighbor(int neighbor);
@@ -56,6 +61,7 @@ public:
 /* constructor for each node*/
 Node::Node() {
 	id = 0;
+	onpath = 0;
 	toInf = 0.0;
 	fromInf = 0.0;
 	in_degree = 0;
@@ -74,6 +80,7 @@ Node::Node(int source, int target, bool flag) {
 		out_neighbor.push_back(source);
 		in_degree += 1;
 	}
+	onpath = 0;
 	toInf = 0.0;
 	fromInf = 0.0;
 	in_degree = 0;
@@ -90,12 +97,17 @@ int Node::get_indegree() {
 int Node::get_outdegree() {
 	return out_degree;
 }
-float Node::get_toinf() {
+int Node::get_onpath() {
+	return onpath;
+}
+
+double Node::get_toinf() {
 	return toInf;
 }
-float Node::get_fromInf() {
+double Node::get_fromInf() {
 	return fromInf;
 }
+
 vector<int> Node::get_in_neighbor(){
 	return in_neighbor;
 }
@@ -103,10 +115,15 @@ vector<int> Node::get_out_neighbor(){
 	return out_neighbor;
 }
 
+
 /* setter */
 void Node::set_id(int _id) {
 	id = _id;
 }
+void Node::set_onpath(int _onpath) {
+	onpath = _onpath;
+}
+
 void Node::add_outneighbor(int neighbor) {
 	out_neighbor.push_back(neighbor);
 	out_degree += 1;
@@ -126,6 +143,7 @@ void Node::readFromfile(ifstream *in) {
 /* for debuggin */
 void Node::print_neighbor() {
 	cout << "Node id: " << id << endl;
+	cout << "on Path ?: " << onpath << endl;
 	cout << "out-neighbor: " << out_neighbor.size() << endl;
 	for (vector<int>::iterator iter = out_neighbor.begin(); iter != out_neighbor.end(); iter++) {
 		cout << *iter << "\t";
@@ -139,31 +157,31 @@ void Node::print_neighbor() {
 }
 /* function define */
 void preprocessing(string filename, Node node[]);
-float TargerBasedInfluence(Node node[], int i, float thresh);
+double TargerBasedInfluence(Node node[], int i, double thresh, double current_path);
 
 int main() {
 	int seed_size = 0;
-	float path_threshold = 0.01;
-
+	double path_threshold = (1.0/160.0);
+	cout << path_threshold << endl;
 	Node* node = new Node[281904];	//	There are 281,903 nodes 2312497 edges in stanford data.
 	preprocessing("web-Stanford.txt", node);
-	
+
 	/* data structure for CELF Queue, sorted by toInfluence */
-	multimap< float, Node > Nodes;
-	multimap< float, Node >::reverse_iterator Iter_node;
-	typedef pair< float, Node > NodePair;
+	multimap< double, Node > Nodes;
+	multimap< double, Node >::reverse_iterator Iter_node;
+	typedef pair< double, Node > NodePair;
 
 	/* 
 	select first node and initiate CELF Queue
 	Node[] index from 1 to 281,903 	
 	*/
 	for (int i = 1; i < 281904; i++){
-		/* small size for testing */
+		/* if the index has no a real node */
 		if (node[i].get_id() == 0){
 			continue;
 		}
 		else{
-			float tmp_inf = TargerBasedInfluence(node, i, path_threshold);
+			double tmp_inf = TargerBasedInfluence(node, i, path_threshold, 1.0);
 			cout << tmp_inf << endl;
 			char tmp;
 			cout << "for viewing the intermediate values" << endl;
@@ -224,7 +242,7 @@ void preprocessing(string filename, Node node[]) {
 
 		/* check current % */
 		i++;
-		if ((i%230000) == 0) {
+		if ((i%460000) == 0) {
 			cout << (i/230000)*10 <<" % read" << endl;
 			break;
 		}
@@ -233,23 +251,44 @@ void preprocessing(string filename, Node node[]) {
 	fin.close();
 }
 /* computing the influence of a node based on target nodes */
-float TargerBasedInfluence(Node node[], int i, float thresh){
+double TargerBasedInfluence(Node node[], int i, double thresh, double current_path){
 	int outdegree = node[i].get_outdegree();
-	cout << "id:" << i << endl;
-	cout << "outdegree: " << outdegree << endl;
+	
+	/* this node is on path */
+	node[i].set_onpath(1);
+	
+	//cout << "id:" << i << endl;
+	//cout << "outdegree: " << outdegree << endl;
 	/* if there is no out-neighbor */
 	if (outdegree == 0){
-		return 1;
+		/* this node leaves path */
+		node[i].set_onpath(0);
+		//cout << node[i].get_id() << " influence: " << 1 << endl;
+		//cout << endl;
+		return 1.0;
 	}
 	/* computing influence of children recursively */
 	else{
-		float inf = 0.0;
+		double inf = 1.0;	// influence itself
 		vector<int> out_neighbor = node[i].get_out_neighbor();
 		for (vector<int>::iterator iter = out_neighbor.begin(); iter != out_neighbor.end(); iter++){
-			float inf_child = TargerBasedInfluence(node, *iter, thresh);
-			float weight_child = (1 / node[*iter].get_indegree());
-			inf += weight_child*(1 + inf_child);
+			if (node[*iter].get_onpath() == 0){
+				double weight_child = (1.0 / node[*iter].get_indegree());
+				/* compare threshold and current path weight */
+				if (thresh <= (weight_child*current_path)){
+					double inf_child = TargerBasedInfluence(node, *iter, thresh, weight_child*current_path);
+					node[*iter].print_neighbor();
+					inf += weight_child*inf_child;
+				}
+				else{
+					continue;
+				}
+			}
 		}
-		return inf;
+		/* this node leaves path */
+		node[i].set_onpath(0);
+		//cout << node[i].get_id() << " influence: " << inf << endl;
+		//cout << endl;
+		return inf; 
 	}
 }
