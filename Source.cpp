@@ -4,6 +4,8 @@
 #include <vector>
 #include <map>
 
+#define EPSILON 0.00001
+
 using namespace std;
 
 class Node {
@@ -50,6 +52,8 @@ public:
 
 	void set_id(int _id);
 	void set_onpath(int _onpath);
+	void set_toInf(double _toInf);
+	void set_fromInf(double _toInf);
 
 	void add_outneighbor(int neighbor);
 	void add_inneighbor(int neighbor);
@@ -123,6 +127,12 @@ void Node::set_id(int _id) {
 void Node::set_onpath(int _onpath) {
 	onpath = _onpath;
 }
+void Node::set_toInf(double _toInf) {
+	toInf = _toInf;
+}
+void Node::set_fromInf(double _fromInf) {
+	fromInf = _fromInf;
+}
 
 void Node::add_outneighbor(int neighbor) {
 	out_neighbor.push_back(neighbor);
@@ -144,32 +154,51 @@ void Node::readFromfile(ifstream *in) {
 void Node::print_neighbor() {
 	cout << "Node id: " << id << endl;
 	cout << "on Path ?: " << onpath << endl;
+	cout << "to influence: " << toInf << endl;
+	cout << "from influence: " << fromInf << endl;
 	cout << "out-neighbor: " << out_neighbor.size() << endl;
-	for (vector<int>::iterator iter = out_neighbor.begin(); iter != out_neighbor.end(); iter++) {
-		cout << *iter << "\t";
-	}
+	//for (vector<int>::iterator iter = out_neighbor.begin(); iter != out_neighbor.end(); iter++) {
+	//	cout << *iter << "\t";
+	//}
 	cout << endl;
 	cout << "in-neighbor: " << in_neighbor.size() << endl;
-	for (vector<int>::iterator iter = in_neighbor.begin(); iter != in_neighbor.end(); iter++) {
-		cout << *iter << "\t";
-	}
+	//for (vector<int>::iterator iter = in_neighbor.begin(); iter != in_neighbor.end(); iter++) {
+	//	cout << *iter << "\t";
+	//}
 	cout << endl;
 }
 /* function define */
 void preprocessing(string filename, Node node[]);
-double TargerBasedInfluence(Node node[], int i, double thresh, double current_path);
+void updateCELFQueue(multimap< double, int> CELF, Node node[]);
+void updateFrominf(Node node[], int seed, double thresh, double current_path);
+double TargetBasedInfluence(Node node[], int i, double thresh, double current_path);
+double SourceBasedInfluence(Node node[], int i, double thresh, double current_path);
 
+
+/* main function */
 int main() {
-	int seed_size = 0;
+	ofstream fout;
+	fout.open("Seedset_target.txt");
+	int select_way = 0;
+	if (select_way == 0){
+		cout << "Target node base " << endl;
+	}
+	else{
+		cout << "Source node base " << endl;
+	}
+	int seed_size = 20;
+	double prev_max = 0.0;
+	double prev_max_tmp = 0.0;
+	int *seed = new int[seed_size];
 	double path_threshold = (1.0/160.0);
-	cout << path_threshold << endl;
+
 	Node* node = new Node[281904];	//	There are 281,903 nodes 2312497 edges in stanford data.
 	preprocessing("web-Stanford.txt", node);
 
 	/* data structure for CELF Queue, sorted by toInfluence */
-	multimap< double, Node > Nodes;
-	multimap< double, Node >::reverse_iterator Iter_node;
-	typedef pair< double, Node > NodePair;
+	multimap< double, int > Nodes;
+	multimap< double, int >::reverse_iterator Iter_node;
+	typedef pair< double, int > NodePair;
 
 	/* 
 	select first node and initiate CELF Queue
@@ -177,28 +206,283 @@ int main() {
 	*/
 	for (int i = 1; i < 281904; i++){
 		/* if the index has no a real node */
+		if ((i % 28000) == 0){
+			cout << (i / 28000) * 10 << "% loading.." << endl;
+		}
 		if (node[i].get_id() == 0){
 			continue;
 		}
 		else{
-			double tmp_inf = TargerBasedInfluence(node, i, path_threshold, 1.0);
-			cout << tmp_inf << endl;
-			char tmp;
-			cout << "for viewing the intermediate values" << endl;
-			cin >> tmp;
+			node[i].set_toInf(TargetBasedInfluence(node, i, path_threshold, 1.0));
+			Nodes.insert(NodePair(node[i].get_toinf(), i));
+			//char tmp;
+			//cout << "for viewing the intermediate values" << endl;
+			//cin >> tmp;
+		}
+	}
+	/* select first seed and delete CELF Queue */
+	seed[0] = Nodes.rbegin()->second;
+	node[seed[0]].set_onpath(1);
+
+	Nodes.erase(--Nodes.rbegin().base());
+	cout << "1st seed selected" << endl;
+	cout << "============================" << endl;
+	prev_max = node[seed[0]].get_toinf();
+	node[seed[0]].print_neighbor();
+
+	fout << "Node id: " << seed[0] << endl;
+	fout << "indegree: " << node[seed[0]].get_indegree() << endl;
+	fout << "outdegree: " << node[seed[0]].get_outdegree() << endl;
+
+
+	/* select 2~n seeds */
+	if (select_way == 0){
+		/* Target node bases influence estimation */
+
+		/* update frominf by first seed */
+		updateFrominf(node, seed[0], path_threshold, 1);
+		node[seed[0]].set_onpath(1);
+
+		for (int i = 1; i < seed_size; i++){
+			cout << i + 1 << "th seed selected " << endl;
+			cout << "============================" << endl;
+			/* start top of CELF Queue */
+			double marginal_gain = 0.0;
+			Node max_marginal;
+			for (Iter_node = Nodes.rbegin(); Iter_node != Nodes.rend(); ++Iter_node){
+				/* CELF Algorithm */
+				if (marginal_gain >= Iter_node->first){
+					break;
+				}
+				/* gain from a new node */
+				int candidata_id = Iter_node->second;
+				double incByNewNode = TargetBasedInfluence(node, candidata_id, path_threshold, 1.0);
+
+				/* recomputation of seeds influence because of a new node */
+				node[candidata_id].set_onpath(1);
+				double seedInf_modified = 0.0;
+				for (int j = 0; j < i; j++){
+					seedInf_modified += TargetBasedInfluence(node, seed[j], path_threshold, 1.0);
+					node[seed[j]].set_onpath(1);
+				}
+
+				node[candidata_id].set_onpath(0);
+				/* compute and update marginal gain of a new node */
+				marginal_gain = (seedInf_modified + incByNewNode) - prev_max;
+				node[candidata_id].set_toInf(marginal_gain);
+
+				if (max_marginal.get_toinf() < marginal_gain){
+					max_marginal = node[candidata_id];
+					prev_max_tmp = (seedInf_modified + incByNewNode);
+				}
+			}
+			prev_max = prev_max_tmp;
+			/* select a next seed */
+			seed[i] = max_marginal.get_id();
+			node[seed[i]].set_onpath(1);
+			node[seed[i]].print_neighbor();
+
+			//char tmp;
+			//cout << "for viewing the intermediate values" << endl;
+			//cin >> tmp;
+
+			cout << "CELF Queue update" << endl;
+
+			/* update CELF Queue, 1-scan CELF Queue */
+			vector<int> tmp_update;
+			for (multimap< double, int >::iterator Iter = Nodes.begin(); Iter != Nodes.end();){
+				multimap< double, int >::iterator erase_iter = Iter++;
+				/* if key and toinf are not same because key was recomputed */
+				double new_inf = node[erase_iter->second].get_toinf();
+				double diff = fabs(erase_iter->first - new_inf);
+				if (diff > EPSILON){
+					tmp_update.push_back(erase_iter->second);
+					Nodes.erase(erase_iter);
+				}
+			}
+
+			for (int i = 0; i < tmp_update.size(); i++){
+				Nodes.insert(NodePair(node[tmp_update[i]].get_toinf(), node[tmp_update[i]].get_id()));
+			} 
+
+			seed[i] = Nodes.rbegin()->second;
+			Nodes.erase(--Nodes.rbegin().base());
+
+			cout << "Current seed set: ";
+			for (int j = 0; j <= i; j++){
+				cout << seed[j] << ", ";
+
+			}
+			fout << "Node id: " << seed[i] << endl;
+			fout << "indegree: " << node[seed[i]].get_indegree() << endl;
+			fout << "outdegree: " << node[seed[i]].get_outdegree() << endl;
+		}
+	}
+	else{
+		/* Source node bases influence estimation */
+		for (int i = 1; i < seed_size; i++){
+			cout << i + 1 << "th seed selected " << endl;
+			cout << "============================" << endl;
+			/* start top of CELF Queue */
+			double marginal_gain = 0.0;
+			Node max_marginal;
+			for (Iter_node = Nodes.rbegin(); Iter_node != Nodes.rend(); ++Iter_node){
+				/* CELF Algorithm */
+				if (marginal_gain >= Iter_node->first){
+					break;
+				}
+				/* gain from a new node */
+				int candidata_id = Iter_node->second;
+				double incByNewNode = SourceBasedInfluence(node, candidata_id, path_threshold, 1.0);
+
+				/* recomputation of seeds influence because of a new node */
+				node[candidata_id].set_onpath(1);
+				double seedInf_modified = 0.0;
+				for (int j = 0; j < i; j++){
+					seedInf_modified += SourceBasedInfluence(node, seed[j], path_threshold, 1.0);
+					node[seed[j]].set_onpath(1);
+				}
+
+				node[candidata_id].set_onpath(0);
+				/* compute and update marginal gain of a new node */
+				marginal_gain = (seedInf_modified + incByNewNode) - prev_max;
+				node[candidata_id].set_toInf(marginal_gain);
+
+				if (max_marginal.get_toinf() < marginal_gain){
+					max_marginal = node[candidata_id];
+					prev_max_tmp = (seedInf_modified + incByNewNode);
+				}
+			}
+			prev_max = prev_max_tmp;
+			/* select a next seed */
+			seed[i] = max_marginal.get_id();
+			node[seed[i]].set_onpath(1);
+			node[seed[i]].print_neighbor();
+
+			//char tmp;
+			//cout << "for viewing the intermediate values" << endl;
+			//cin >> tmp;
+
+			cout << "CELF Queue update" << endl;
+
+			/* update CELF Queue, 1-scan CELF Queue */
+			vector<int> tmp_update;
+			for (multimap< double, int >::iterator Iter = Nodes.begin(); Iter != Nodes.end();){
+				multimap< double, int >::iterator erase_iter = Iter++;
+				/* if key and toinf are not same because key was recomputed */
+				double new_inf = node[erase_iter->second].get_toinf();
+				double diff = fabs(erase_iter->first - new_inf);
+				if (diff > EPSILON){
+					tmp_update.push_back(erase_iter->second);
+					Nodes.erase(erase_iter);
+				}
+			}
+
+			for (int i = 0; i < tmp_update.size(); i++){
+				Nodes.insert(NodePair(node[tmp_update[i]].get_toinf(), node[tmp_update[i]].get_id()));
+			}
+
+			seed[i] = Nodes.rbegin()->second;
+			Nodes.erase(--Nodes.rbegin().base());
+
+			cout << "Current seed set: ";
+			for (int j = 0; j <= i; j++){
+				cout << seed[j] << ", ";
+
+			}
+			fout << "Node id: " << seed[i] << endl;
+			fout << "indegree: " << node[seed[i]].get_indegree() << endl;
+			fout << "outdegree: " << node[seed[i]].get_outdegree() << endl;
 		}
 	}
 
-	//Nodes.insert(NodePair(test1.get_outdegree(), test1));
 
 
-	for (Iter_node = Nodes.rbegin(); Iter_node != Nodes.rend(); ++Iter_node){
-		Iter_node->second.get_id();
-		Iter_node->first;
-	}
-
+	fout.close();
+	delete[] seed;
+	delete[] node;
 	return 0;
 }
+
+/* computing the influence of a node based on target nodes (proposed)*/
+double TargetBasedInfluence(Node node[], int i, double thresh, double current_path){
+	int outdegree = node[i].get_outdegree();
+	
+	/* this node is on path */
+
+	node[i].set_onpath(1);
+	
+	/* if there is no out-neighbor, stop path making */
+	if (outdegree == 0){
+		/* this node leaves path */
+		node[i].set_onpath(0);
+		return 1.0;
+	}
+	/* computing influence of children recursively */
+	else{
+		double inf = 1.0;	// influence itself
+		vector<int> out_neighbor = node[i].get_out_neighbor();
+		for (vector<int>::iterator iter = out_neighbor.begin(); iter != out_neighbor.end(); iter++){
+			/* if target node is not on the path */
+			if (node[*iter].get_onpath() == 0){
+				double weight_child = (1.0 / node[*iter].get_indegree());
+				/* compare threshold and current path weight */
+				if (thresh <= (weight_child*current_path)){
+					double inf_child = TargetBasedInfluence(node, *iter, thresh, weight_child*current_path);
+					inf += weight_child*inf_child;
+				}
+				else{
+					continue;
+				}
+			}
+		}
+		/* this node leaves path */
+		node[i].set_onpath(0);
+		//cout << node[i].get_id() << " influence: " << inf << endl;
+		//cout << endl;
+		return inf; 
+	}
+}
+/* computing the influence of a node based on source nodes (existing) */
+double SourceBasedInfluence(Node node[], int i, double thresh, double current_path){
+	int outdegree = node[i].get_outdegree();
+
+	/* this node is on path */
+
+	node[i].set_onpath(1);
+
+	/* if there is no out-neighbor, stop path making */
+	if (outdegree == 0){
+		/* this node leaves path */
+		node[i].set_onpath(0);
+		return 1.0;
+	}
+	/* computing influence of children recursively */
+	else{
+		double inf = 1.0;	// influence itself
+		vector<int> out_neighbor = node[i].get_out_neighbor();
+		for (vector<int>::iterator iter = out_neighbor.begin(); iter != out_neighbor.end(); iter++){
+			/* if target node is not on the path */
+			if (node[*iter].get_onpath() == 0){
+				double weight_child = (1.0 / node[*iter].get_indegree());
+				/* compare threshold and current path weight */
+				if (thresh <= (weight_child*current_path)){
+					double inf_child = SourceBasedInfluence(node, *iter, thresh, weight_child*current_path);
+					inf += weight_child*inf_child;
+				}
+				else{
+					continue;
+				}
+			}
+		}
+		/* this node leaves path */
+		node[i].set_onpath(0);
+		//cout << node[i].get_id() << " influence: " << inf << endl;
+		//cout << endl;
+		return inf;
+	}
+}
+
 /* preprocessing the origin data*/
 void preprocessing(string filename, Node node[]) {
 	ifstream fin;
@@ -242,42 +526,55 @@ void preprocessing(string filename, Node node[]) {
 
 		/* check current % */
 		i++;
-		if ((i%460000) == 0) {
-			cout << (i/230000)*10 <<" % read" << endl;
-			break;
+		if ((i % 460000) == 0) {
+			cout << (i / 230000) * 10 << " % read" << endl;
+			//break;
 		}
 	}
 	cout << "Input file read successfully" << endl;
 	fin.close();
 }
-/* computing the influence of a node based on target nodes */
-double TargerBasedInfluence(Node node[], int i, double thresh, double current_path){
+void updateCELFQueue(multimap< double, int> Nodes, Node node[]){
+	vector<int> tmp_update;
+	typedef pair< double, int > NodePair;
+	for (multimap< double, int >::iterator Iter = Nodes.begin(); Iter != Nodes.end();){
+		multimap< double, int >::iterator erase_iter = Iter++;
+		/* if key and toinf are not same because key was recomputed */
+		double new_inf = node[erase_iter->second].get_toinf();
+		double diff = fabs(erase_iter->first - new_inf);
+		if (diff > EPSILON){
+			tmp_update.push_back(erase_iter->second);
+			Nodes.erase(erase_iter);
+		}
+	}
+
+	for (int i = 0; i < tmp_update.size(); i++){
+		Nodes.insert(NodePair(node[tmp_update[i]].get_toinf(), node[tmp_update[i]].get_id()));
+	}
+}
+void updateFrominf(Node node[], int seed, double thresh, double current_path){
+	int i = seed;
 	int outdegree = node[i].get_outdegree();
-	
+
 	/* this node is on path */
 	node[i].set_onpath(1);
-	
-	//cout << "id:" << i << endl;
-	//cout << "outdegree: " << outdegree << endl;
-	/* if there is no out-neighbor */
+
+	/* if there is no out-neighbor, stop this process */
 	if (outdegree == 0){
 		/* this node leaves path */
 		node[i].set_onpath(0);
-		//cout << node[i].get_id() << " influence: " << 1 << endl;
-		//cout << endl;
-		return 1.0;
 	}
-	/* computing influence of children recursively */
+	/* updating from Influence recursively */
 	else{
 		double inf = 1.0;	// influence itself
 		vector<int> out_neighbor = node[i].get_out_neighbor();
 		for (vector<int>::iterator iter = out_neighbor.begin(); iter != out_neighbor.end(); iter++){
+			/* if target node is not on the path */
 			if (node[*iter].get_onpath() == 0){
 				double weight_child = (1.0 / node[*iter].get_indegree());
 				/* compare threshold and current path weight */
 				if (thresh <= (weight_child*current_path)){
-					double inf_child = TargerBasedInfluence(node, *iter, thresh, weight_child*current_path);
-					node[*iter].print_neighbor();
+					double inf_child = SourceBasedInfluence(node, *iter, thresh, weight_child*current_path);
 					inf += weight_child*inf_child;
 				}
 				else{
@@ -289,6 +586,5 @@ double TargerBasedInfluence(Node node[], int i, double thresh, double current_pa
 		node[i].set_onpath(0);
 		//cout << node[i].get_id() << " influence: " << inf << endl;
 		//cout << endl;
-		return inf; 
 	}
 }
