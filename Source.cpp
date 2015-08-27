@@ -243,6 +243,12 @@ int main() {
 		updateFrominf(node, seed[0], path_threshold, 1);
 		node[seed[0]].set_onpath(1);
 
+		vector<int> out_neighbor = node[seed[0]].get_out_neighbor();
+		for (vector<int>::iterator iter = out_neighbor.begin(); iter != out_neighbor.end(); iter++){
+			node[*iter].print_neighbor();
+		}
+
+
 		for (int i = 1; i < seed_size; i++){
 			cout << i + 1 << "th seed selected " << endl;
 			cout << "============================" << endl;
@@ -428,8 +434,14 @@ double TargetBasedInfluence(Node node[], int i, double thresh, double current_pa
 				double weight_child = (1.0 / node[*iter].get_indegree());
 				/* compare threshold and current path weight */
 				if (thresh <= (weight_child*current_path)){
+					/* real marginal gain => ex (1 - (1-a)(1-b)) - (1 - (1-a)) */
+					double prev_frominf = node[*iter].get_fromInf();
+
+					/* if frominf == 0 ?? consider this situation */
+					double tmp = 1 - prev_frominf;
+
 					double inf_child = TargetBasedInfluence(node, *iter, thresh, weight_child*current_path);
-					inf += weight_child*inf_child;
+					inf += tmp*weight_child*inf_child;
 				}
 				else{
 					continue;
@@ -574,8 +586,19 @@ void updateFrominf(Node node[], int seed, double thresh, double current_path){
 				double weight_child = (1.0 / node[*iter].get_indegree());
 				/* compare threshold and current path weight */
 				if (thresh <= (weight_child*current_path)){
-					double inf_child = SourceBasedInfluence(node, *iter, thresh, weight_child*current_path);
-					inf += weight_child*inf_child;
+					/* update from Influence */
+
+					/* real marginal gain => ex (1 - (1-a)(1-b)) - (1 - (1-a)) */
+					double prev_frominf = node[*iter].get_fromInf();
+					double tmp = 1 - prev_frominf;
+					node[*iter].set_fromInf(tmp*weight_child*current_path);
+					if (i == 68889){
+						node[*iter].print_neighbor();
+						cout << tmp << endl;
+						cout << weight_child << endl;
+						cout << current_path << endl;
+					}
+					updateFrominf(node, *iter, thresh, weight_child*current_path);
 				}
 				else{
 					continue;
@@ -584,7 +607,5 @@ void updateFrominf(Node node[], int seed, double thresh, double current_path){
 		}
 		/* this node leaves path */
 		node[i].set_onpath(0);
-		//cout << node[i].get_id() << " influence: " << inf << endl;
-		//cout << endl;
 	}
 }
